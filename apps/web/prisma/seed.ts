@@ -1,4 +1,4 @@
-import { PrismaClient, type Prisma } from "@prisma/client";
+import { PrismaClient } from "@prisma/client";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import bcrypt from "bcryptjs";
 
@@ -368,7 +368,7 @@ async function main() {
         })
       : null;
 
-    const activitySeed: Prisma.ActivityEventCreateManyInput[] = [
+    const activitySeed = [
       {
         siteId: site.id,
         pageId: homePage.id,
