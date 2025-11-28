@@ -12,6 +12,8 @@ datasource db {
 
 enum PageStatus {
   DRAFT
+  REVIEW
+  SCHEDULED
   PUBLISHED
   ARCHIVED
 }
@@ -21,6 +23,31 @@ enum RevisionStatus {
   REVIEW
   SCHEDULED
   PUBLISHED
+}
+
+enum ReviewEventType {
+  SUBMITTED
+  APPROVED
+  REJECTED
+  CHANGES_REQUESTED
+}
+
+enum CommentStatus {
+  OPEN
+  RESOLVED
+}
+
+enum ActivityKind {
+  PAGE_CREATED
+  REVISION_SUBMITTED
+  REVISION_APPROVED
+  REVISION_CHANGES_REQUESTED
+  REVISION_PUBLISHED
+  REVISION_SCHEDULED
+  REVISION_UNSCHEDULED
+  COMMENT_ADDED
+  COMMENT_RESOLVED
+  COMMENT_REOPENED
 }
 
 enum NavigationPlacement {
@@ -38,6 +65,55 @@ enum AssetType {
   OTHER
 }
 
+enum AssetProcessingStatus {
+  IDLE
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+enum AssetTransformStatus {
+  PENDING
+  PROCESSING
+  READY
+  FAILED
+}
+
+enum AssetTransformKind {
+  ORIGINAL
+  RESIZE
+  WEBP
+  THUMBNAIL
+  CUSTOM
+}
+
+enum PublicationAction {
+  PUBLISH
+  UNPUBLISH
+  SCHEDULE
+  UNSCHEDULE
+  AUTO_PUBLISH
+}
+
+enum PublicationSource {
+  MANUAL
+  SCHEDULER
+  SYSTEM
+}
+
+enum WebhookDeliveryStatus {
+  PENDING
+  DELIVERED
+  FAILED
+}
+
+enum SearchProvider {
+  NONE
+  ALGOLIA
+  MEILISEARCH
+}
+
 model User {
   id            String    @id @default(cuid())
   name          String?
@@ -48,10 +124,20 @@ model User {
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
-  accounts    Account[]
-  sessions    Session[]
-  memberships SiteMembership[]
-  revisions   Revision[]       @relation("RevisionAuthors")
+  accounts             Account[]
+  sessions             Session[]
+  memberships          SiteMembership[]
+  revisions            Revision[]             @relation("RevisionAuthors")
+  reviewedRevisions    Revision[]             @relation("RevisionReviewers")
+  scheduledRevisions   Revision[]             @relation("RevisionSchedulers")
+  assetTagAssignments  AssetTagOnAsset[]      @relation("AssetTagAssignments")
+  createdPreviewTokens RevisionPreviewToken[] @relation("PreviewTokenCreatedBy")
+  publicationLogs      PublicationLog[]     @relation("PublicationLogActor")
+  reviewEvents         ReviewEvent[]        @relation("ReviewEventActor")
+  blockCommentThreads  BlockCommentThread[] @relation("ThreadCreatedBy")
+  resolvedCommentThreads BlockCommentThread[] @relation("ThreadResolvedBy")
+  blockComments        BlockComment[]
+  activityEvents       ActivityEvent[]      @relation("ActivityEventActor")
 
   @@index([email])
 }
@@ -108,12 +194,24 @@ model Site {
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
-  pages       Page[]
-  menus       NavigationMenu[]
-  assets      Asset[]
-  metadata    Metadata[]
-  memberships SiteMembership[]
-  roles       Role[]
+  pages             Page[]
+  menus             NavigationMenu[]
+  assets            Asset[]
+  assetFolders      AssetFolder[]
+  assetTags         AssetTag[]
+  metadata            Metadata[]
+  memberships         SiteMembership[]
+  roles               Role[]
+  domains             SiteDomain[]
+  previewTokens       RevisionPreviewToken[]
+  publicationLogs     PublicationLog[]
+  reviewEvents        ReviewEvent[]
+  blockCommentThreads BlockCommentThread[]
+  activityEvents      ActivityEvent[]
+  apiTokens           ApiToken[]
+  webhooks            IntegrationWebhook[]
+  webhookDeliveries   WebhookDelivery[]
+  searchIntegration   SearchIntegration?
 }
 
 model SiteMembership {
@@ -157,43 +255,65 @@ model Page {
   createdAt   DateTime   @default(now())
   updatedAt   DateTime   @updatedAt
 
-  site            Site             @relation(fields: [siteId], references: [id], onDelete: Cascade)
-  revisions       Revision[]
-  metadata        Metadata[]
-  blocks          ContentBlock[]
-  navigationItems NavigationItem[]
+  site               Site                   @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  revisions          Revision[]
+  metadata           Metadata[]
+  blocks             ContentBlock[]
+  navigationItems    NavigationItem[]
+  previewTokens      RevisionPreviewToken[]
+  publicationLogs    PublicationLog[]
+  reviewEvents       ReviewEvent[]
+  blockCommentThreads BlockCommentThread[]
+  activityEvents     ActivityEvent[]
 
   @@unique([siteId, path])
   @@unique([siteId, slug])
 }
 
 model Revision {
-  id           String         @id @default(cuid())
-  pageId       String
-  authorId     String?
-  status       RevisionStatus @default(DRAFT)
-  summary      String?
-  publishedAt  DateTime?
-  scheduledFor DateTime?
-  meta         Json           @default("{}")
-  createdAt    DateTime       @default(now())
+  id                String         @id @default(cuid())
+  pageId            String
+  authorId          String?
+  reviewedById      String?
+  scheduledById     String?
+  status            RevisionStatus @default(DRAFT)
+  summary           String?
+  publishedAt       DateTime?
+  scheduledFor      DateTime?
+  scheduledTimezone String?
+  reviewedAt        DateTime?
+  meta              Json           @default("{}")
+  createdAt         DateTime       @default(now())
 
-  page   Page           @relation(fields: [pageId], references: [id], onDelete: Cascade)
-  author User?          @relation("RevisionAuthors", fields: [authorId], references: [id], onDelete: SetNull)
-  blocks ContentBlock[]
+  page               Page                   @relation(fields: [pageId], references: [id], onDelete: Cascade)
+  author             User?                  @relation("RevisionAuthors", fields: [authorId], references: [id], onDelete: SetNull)
+  reviewer           User?                  @relation("RevisionReviewers", fields: [reviewedById], references: [id], onDelete: SetNull)
+  scheduler          User?                  @relation("RevisionSchedulers", fields: [scheduledById], references: [id], onDelete: SetNull)
+  blocks             ContentBlock[]
+  previewTokens      RevisionPreviewToken[]
+  publicationLogs    PublicationLog[]
+  reviewEvents       ReviewEvent[]
+  blockCommentThreads BlockCommentThread[]
+  activityEvents     ActivityEvent[]
 }
 
 model ContentBlock {
-  id         String   @id @default(cuid())
-  pageId     String
-  revisionId String?
-  kind       String
-  data       Json
-  sortOrder  Int      @default(0)
-  createdAt  DateTime @default(now())
+  id           String   @id @default(cuid())
+  pageId       String
+  revisionId   String?
+  kind         String
+  data         Json
+  settings     Json     @default("{}")
+  sortOrder    Int      @default(0)
+  createdAt    DateTime @default(now())
+  referenceKey String   @db.Uuid @default(dbgenerated("gen_random_uuid()"))
 
   page     Page      @relation(fields: [pageId], references: [id], onDelete: Cascade)
   revision Revision? @relation(fields: [revisionId], references: [id], onDelete: Cascade)
+
+  @@index([pageId, revisionId])
+  @@index([pageId, referenceKey])
+  @@unique([revisionId, referenceKey])
 }
 
 model NavigationMenu {
@@ -226,22 +346,243 @@ model NavigationItem {
   page     Page?            @relation(fields: [pageId], references: [id], onDelete: SetNull)
   parent   NavigationItem?  @relation("NavigationHierarchy", fields: [parentId], references: [id], onDelete: Cascade)
   children NavigationItem[] @relation("NavigationHierarchy")
+
+  @@index([menuId, parentId])
+  @@index([menuId, sortOrder])
+}
+
+model RevisionPreviewToken {
+  id          String    @id @default(cuid())
+  token       String    @unique
+  revisionId  String
+  pageId      String
+  siteId      String
+  createdById String?
+  expiresAt   DateTime
+  revoked     Boolean   @default(false)
+  revokedAt   DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  revision  Revision @relation(fields: [revisionId], references: [id], onDelete: Cascade)
+  page      Page     @relation(fields: [pageId], references: [id], onDelete: Cascade)
+  site      Site     @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  createdBy User?    @relation("PreviewTokenCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([revisionId, revoked, expiresAt])
+  @@index([siteId, createdAt])
+}
+
+model PublicationLog {
+  id         String            @id @default(cuid())
+  siteId     String
+  pageId     String
+  revisionId String?
+  actorId    String?
+  action     PublicationAction
+  source     PublicationSource @default(MANUAL)
+  metadata   Json              @default("{}")
+  occurredAt DateTime          @default(now())
+
+  site     Site      @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  page     Page      @relation(fields: [pageId], references: [id], onDelete: Cascade)
+  revision Revision? @relation(fields: [revisionId], references: [id], onDelete: SetNull)
+  actor    User?     @relation("PublicationLogActor", fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([pageId, occurredAt])
+  @@index([siteId, occurredAt])
+}
+
+model ReviewEvent {
+  id         String          @id @default(cuid())
+  siteId     String
+  pageId     String
+  revisionId String
+  actorId    String?
+  type       ReviewEventType
+  note       String?
+  createdAt  DateTime        @default(now())
+
+  site     Site     @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  page     Page     @relation(fields: [pageId], references: [id], onDelete: Cascade)
+  revision Revision @relation(fields: [revisionId], references: [id], onDelete: Cascade)
+  actor    User?    @relation("ReviewEventActor", fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([pageId, createdAt])
+  @@index([revisionId, createdAt])
+  @@index([siteId, createdAt])
+}
+
+model BlockCommentThread {
+  id                String        @id @default(cuid())
+  siteId            String
+  pageId            String
+  revisionId        String
+  blockReferenceKey String        @db.Uuid
+  status            CommentStatus @default(OPEN)
+  createdById       String
+  resolvedById      String?
+  resolvedAt        DateTime?
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+
+  site           Site       @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  page           Page       @relation(fields: [pageId], references: [id], onDelete: Cascade)
+  revision       Revision   @relation(fields: [revisionId], references: [id], onDelete: Cascade)
+  createdBy      User       @relation("ThreadCreatedBy", fields: [createdById], references: [id], onDelete: Cascade)
+  resolvedBy     User?      @relation("ThreadResolvedBy", fields: [resolvedById], references: [id], onDelete: SetNull)
+  comments       BlockComment[]
+  activityEvents ActivityEvent[] @relation("ActivityEventCommentThread")
+
+  @@index([pageId, blockReferenceKey])
+  @@index([pageId, revisionId, status])
+  @@index([siteId, createdAt])
+}
+
+model BlockComment {
+  id        String   @id @default(cuid())
+  threadId  String
+  authorId  String
+  body      String   @db.Text
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  thread         BlockCommentThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  author         User               @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  activityEvents ActivityEvent[]    @relation("ActivityEventComment")
+
+  @@index([threadId, createdAt])
+}
+
+model ActivityEvent {
+  id              String       @id @default(cuid())
+  siteId          String
+  pageId          String
+  revisionId      String?
+  actorId         String?
+  kind            ActivityKind
+  metadata        Json         @default("{}")
+  occurredAt      DateTime     @default(now())
+  commentThreadId String?
+  commentId       String?
+
+  site          Site                @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  page          Page                @relation(fields: [pageId], references: [id], onDelete: Cascade)
+  revision      Revision?           @relation(fields: [revisionId], references: [id], onDelete: SetNull)
+  actor         User?               @relation("ActivityEventActor", fields: [actorId], references: [id], onDelete: SetNull)
+  commentThread BlockCommentThread? @relation("ActivityEventCommentThread", fields: [commentThreadId], references: [id], onDelete: SetNull)
+  comment       BlockComment?       @relation("ActivityEventComment", fields: [commentId], references: [id], onDelete: SetNull)
+
+  @@index([pageId, occurredAt])
+  @@index([siteId, occurredAt])
+  @@index([revisionId, occurredAt])
 }
 
 model Asset {
-  id        String    @id @default(cuid())
-  siteId    String
-  label     String
-  url       String
-  type      AssetType @default(IMAGE)
-  altText   String?
-  width     Int?
-  height    Int?
-  metadata  Json      @default("{}")
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
+  id                 String                @id @default(cuid())
+  siteId             String
+  folderId           String?
+  label              String
+  fileName           String
+  mimeType           String
+  fileSize           Int
+  url                String
+  storageKey         String                @unique
+  type               AssetType             @default(IMAGE)
+  altText            String?
+  altTextPrompt      String?
+  altTextGeneratedAt DateTime?
+  altTextSource      String?
+  width              Int?
+  height             Int?
+  checksum           String
+  transformStatus    AssetProcessingStatus @default(IDLE)
+  cdnUrl             String?
+  metadata           Json                  @default("{}")
+  createdAt          DateTime              @default(now())
+  updatedAt          DateTime              @updatedAt
 
-  site Site @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  site       Site              @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  folder     AssetFolder?      @relation(fields: [folderId], references: [id], onDelete: SetNull)
+  tags       AssetTagOnAsset[]
+  transforms AssetTransform[]
+
+  @@index([siteId, folderId, createdAt])
+  @@index([siteId, label])
+}
+
+model AssetFolder {
+  id        String   @id @default(cuid())
+  siteId    String
+  parentId  String?
+  name      String
+  slug      String
+  path      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  site     Site          @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  parent   AssetFolder?  @relation("AssetFolderHierarchy", fields: [parentId], references: [id], onDelete: Cascade)
+  children AssetFolder[] @relation("AssetFolderHierarchy")
+  assets   Asset[]
+
+  @@unique([siteId, path])
+  @@index([siteId, parentId])
+  @@index([siteId, slug])
+}
+
+model AssetTag {
+  id          String   @id @default(cuid())
+  siteId      String
+  name        String
+  slug        String
+  color       String?
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  site   Site              @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  assets AssetTagOnAsset[]
+
+  @@unique([siteId, slug])
+  @@index([siteId, name])
+}
+
+model AssetTagOnAsset {
+  assetId      String
+  tagId        String
+  assignedById String?
+  assignedAt   DateTime @default(now())
+
+  asset      Asset    @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  tag        AssetTag @relation(fields: [tagId], references: [id], onDelete: Cascade)
+  assignedBy User?    @relation("AssetTagAssignments", fields: [assignedById], references: [id], onDelete: SetNull)
+
+  @@id([assetId, tagId])
+  @@index([tagId, assetId])
+}
+
+model AssetTransform {
+  id         String               @id @default(cuid())
+  assetId    String
+  kind       AssetTransformKind   @default(RESIZE)
+  format     String?
+  width      Int?
+  height     Int?
+  quality    Int?
+  status     AssetTransformStatus @default(PENDING)
+  storageKey String
+  url        String?
+  checksum   String?
+  meta       Json                 @default("{}")
+  error      String?
+  createdAt  DateTime             @default(now())
+  updatedAt  DateTime             @updatedAt
+
+  asset Asset @relation(fields: [assetId], references: [id], onDelete: Cascade)
+
+  @@unique([assetId, storageKey])
+  @@index([assetId, kind, width, height])
 }
 
 model Metadata {
@@ -256,7 +597,97 @@ model Metadata {
   site Site  @relation(fields: [siteId], references: [id], onDelete: Cascade)
   page Page? @relation(fields: [pageId], references: [id], onDelete: Cascade)
 
+  @@unique([pageId, key])
   @@index([siteId, key])
   @@index([pageId, key])
-  @@unique([pageId, key])
+}
+
+model SiteDomain {
+  id                String   @id @default(cuid())
+  siteId            String
+  domain            String   @unique
+  label             String?
+  isPrimary         Boolean  @default(false)
+  redirectToPrimary Boolean  @default(true)
+  locale            String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  site Site @relation(fields: [siteId], references: [id], onDelete: Cascade)
+}
+
+model ApiToken {
+  id          String   @id @default(cuid())
+  siteId      String
+  name        String
+  description String?
+  tokenHash   String   @unique
+  tokenPrefix String
+  scopes      String[]
+  lastUsedAt  DateTime?
+  revokedAt   DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  site Site @relation(fields: [siteId], references: [id], onDelete: Cascade)
+
+  @@index([siteId, revokedAt])
+  @@index([tokenPrefix])
+}
+
+model IntegrationWebhook {
+  id          String   @id @default(cuid())
+  siteId      String
+  name        String
+  url         String   @db.Text
+  secret      String?
+  events      String[] @default([])
+  isEnabled   Boolean  @default(false)
+  headers     Json     @default("{}")
+  lastSentAt  DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  site       Site               @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  deliveries WebhookDelivery[]
+
+  @@unique([siteId, name])
+  @@index([siteId, isEnabled])
+}
+
+model WebhookDelivery {
+  id            String                @id @default(cuid())
+  webhookId     String
+  siteId        String
+  eventType     String
+  payload       Json
+  status        WebhookDeliveryStatus @default(PENDING)
+  attemptCount  Int                   @default(0)
+  nextRetryAt   DateTime?
+  responseCode  Int?
+  errorMessage  String?
+  deliveredAt   DateTime?
+  createdAt     DateTime              @default(now())
+  updatedAt     DateTime              @updatedAt
+
+  webhook IntegrationWebhook @relation(fields: [webhookId], references: [id], onDelete: Cascade)
+  site    Site               @relation(fields: [siteId], references: [id], onDelete: Cascade)
+
+  @@index([webhookId, createdAt])
+  @@index([siteId, createdAt])
+  @@index([status, nextRetryAt])
+}
+
+model SearchIntegration {
+  id         String         @id @default(cuid())
+  siteId     String         @unique
+  provider   SearchProvider @default(NONE)
+  indexName  String?
+  config     Json           @default("{}")
+  lastSyncAt DateTime?
+  lastError  String?
+  createdAt  DateTime       @default(now())
+  updatedAt  DateTime       @updatedAt
+
+  site Site @relation(fields: [siteId], references: [id], onDelete: Cascade)
 }

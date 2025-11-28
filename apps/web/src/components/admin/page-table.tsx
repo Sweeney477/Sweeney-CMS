@@ -1,3 +1,5 @@
+"use client";
+
 import Link from "next/link";
 import { formatDistanceToNow } from "date-fns";
 
@@ -22,6 +24,8 @@ type PageTableProps = {
 const statusVariant: Record<string, "default" | "success" | "warning"> = {
   PUBLISHED: "success",
   DRAFT: "warning",
+  REVIEW: "warning",
+  SCHEDULED: "warning",
   ARCHIVED: "default",
 };
 
@@ -30,8 +34,14 @@ export function PageTable({ pages }: PageTableProps) {
     <Card>
       <CardHeader className="flex items-center justify-between">
         <CardTitle>Pages</CardTitle>
-        <Button variant="secondary" size="sm" asChild>
-          <a href="#create-page">New Page</a>
+        <Button
+          variant="secondary"
+          size="sm"
+          onClick={() => {
+            window.location.hash = "create-page";
+          }}
+        >
+          New Page
         </Button>
       </CardHeader>
       <CardContent className="overflow-x-auto">
@@ -59,9 +69,12 @@ export function PageTable({ pages }: PageTableProps) {
                   {formatDistanceToNow(page.updatedAt, { addSuffix: true })}
                 </TD>
                 <TD className="text-right">
-                  <Button variant="outline" size="sm" asChild>
-                    <Link href={`/admin/pages/${page.id}`}>Edit</Link>
-                  </Button>
+                  <Link
+                    href={`/admin/pages/${page.id}`}
+                    className="inline-flex h-8 items-center justify-center gap-2 rounded-md border border-slate-200 bg-white px-3 text-sm font-medium text-slate-900 transition hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600"
+                  >
+                    Edit
+                  </Link>
                 </TD>
               </TR>
             ))}
@@ -78,4 +91,3 @@ export function PageTable({ pages }: PageTableProps) {
     </Card>
   );
 }
-

@@ -1,0 +1,34 @@
+#! uploads-deployment.yaml
+# Generated code, do not edit
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+    name: uploads
+    namespace: sweeneycms
+    labels:
+        app: uploads
+spec:
+    replicas: 1
+    selector:
+        matchLabels:
+            app: uploads
+    template:
+        metadata:
+            labels:
+                app: uploads
+        spec:
+            containers:
+                - name: uploads
+                  image: nginx:alpine
+                  ports:
+                      - containerPort: 80
+                  volumeMounts:
+                      - mountPath: /usr/share/nginx/html/uploads
+                        name: uploads-data
+            volumes:
+                - name: uploads-data
+                  persistentVolumeClaim:
+                      claimName: uploads-data
+
+
+

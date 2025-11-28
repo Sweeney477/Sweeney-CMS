@@ -11,21 +11,28 @@ import { listPages } from "@/server/services/page-service";
 import { getNavigationMenu } from "@/server/services/navigation-service";
 
 type AdminPageProps = {
-  searchParams?: { site?: string };
+  searchParams: Promise<{ site?: string }>;
 };
 
-export default async function AdminDashboard({ searchParams }: AdminPageProps) {
+export default async function AdminDashboard(props: AdminPageProps) {
   await requireUser();
+  const searchParams = await props.searchParams;
   const sites = await listSites();
+  const requestHeaders = await headers();
   const currentSite = await resolveActiveSite({
     siteSlug: searchParams?.site,
-    domain: headers().get("host"),
+    domain: requestHeaders.get("host") ?? undefined,
   });
   const pages = await listPages(currentSite.id);
   const menu = await getNavigationMenu({
     siteId: currentSite.id,
     placement: "PRIMARY",
   });
+  const pageOptions = pages.map((page) => ({
+    id: page.id,
+    title: page.title,
+    path: page.path,
+  }));
 
   const stats = [
     {
@@ -57,9 +64,15 @@ export default async function AdminDashboard({ searchParams }: AdminPageProps) {
     >
       <StatsGrid stats={stats} />
       <PageTable pages={pages} />
-      {menu && <NavigationEditor menuId={menu.id} items={menu.items} />}
+      {menu && (
+        <NavigationEditor
+          menuId={menu.id}
+          items={menu.items}
+          pages={pageOptions}
+          placement="PRIMARY"
+        />
+      )}
       <NewPageForm siteId={currentSite.id} />
     </AdminShell>
   );
 }
-

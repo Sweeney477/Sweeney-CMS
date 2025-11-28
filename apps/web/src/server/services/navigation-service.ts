@@ -7,6 +7,12 @@ export type NavigationTreeItem = {
   label: string;
   url: string;
   openInNew: boolean;
+  type: "INTERNAL" | "EXTERNAL";
+  pageId: string | null;
+  pageTitle: string | null;
+  pagePath: string | null;
+  parentId: string | null;
+  sortOrder: number;
   children: NavigationTreeItem[];
 };
 
@@ -22,6 +28,15 @@ export async function getNavigationMenu(options: {
     include: {
       items: {
         orderBy: { sortOrder: "asc" },
+        include: {
+          page: {
+            select: {
+              id: true,
+              title: true,
+              path: true,
+            },
+          },
+        },
       },
     },
   });
@@ -33,11 +48,19 @@ export async function getNavigationMenu(options: {
   const itemsByParent = new Map<string | null, NavigationTreeItem[]>();
 
   for (const item of menu.items) {
+    const page = item.page;
+    const pagePath = page?.path ?? null;
     const node: NavigationTreeItem = {
       id: item.id,
       label: item.label,
-      url: item.url,
+      url: pagePath ?? item.url,
       openInNew: item.openInNew,
+      type: page ? "INTERNAL" : "EXTERNAL",
+      pageId: page?.id ?? null,
+      pageTitle: page?.title ?? null,
+      pagePath,
+      parentId: item.parentId ?? null,
+      sortOrder: item.sortOrder,
       children: [],
     };
 

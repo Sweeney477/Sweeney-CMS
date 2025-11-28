@@ -1,0 +1,14 @@
+#! kustomization.yaml
+# Generated code, do not edit
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+    - 0-sweeneycms-namespace.yaml
+    - default-network-policy.yaml
+    - postgres-deployment.yaml
+    - postgres-expose.yaml
+    - postgres-postgres-data-persistentVolumeClaim.yaml
+    - postgres-service.yaml
+    - uploads-persistentVolumeClaim.yaml
+    - uploads-deployment.yaml
+    - uploads-service.yaml

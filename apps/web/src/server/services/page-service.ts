@@ -2,15 +2,30 @@ import "server-only";
 
 import type { Page, Revision } from "@prisma/client";
 import { cache } from "react";
-import { z } from "zod";
 
 import { prisma } from "@/server/db";
+import { releaseDueRevisionForPage } from "@/server/services/scheduler-service";
+import {
+  blockDataSchema,
+  blockSettingsSchema,
+  type BlockPayload,
+  type BlockSettings,
+} from "@/lib/blocks";
 
-export type RenderableBlock = {
-  id: string;
+type LegacyBlock = {
+  id?: string;
   kind: string;
-  sortOrder: number;
   data: Record<string, unknown>;
+  settings: BlockSettings;
+};
+
+type ParsedBlock = BlockPayload | LegacyBlock;
+
+export type RenderableBlock = ParsedBlock & {
+  id: string;
+  sortOrder: number;
+  referenceKey: string;
+  recordId: string;
 };
 
 export type RenderablePage = {
@@ -23,13 +38,15 @@ export type RenderablePage = {
     id: string;
     name: string;
     slug: string;
+    timezone: string;
   };
   metadata: Record<string, unknown>;
   blocks: RenderableBlock[];
-  revision?: Pick<Revision, "id" | "status" | "summary" | "createdAt">;
+  revision?: Pick<
+    Revision,
+    "id" | "status" | "summary" | "createdAt" | "scheduledFor" | "scheduledTimezone" | "reviewedAt"
+  > & { meta?: Record<string, unknown> };
 };
-
-const contentSchema = z.record(z.any()).optional();
 
 export const getRenderablePage = cache(
   async (options: {
@@ -38,6 +55,8 @@ export const getRenderablePage = cache(
     includeDraft?: boolean;
     revisionId?: string;
   }): Promise<RenderablePage | null> => {
+    await releaseDueRevisionForPage(options.siteId, options.path);
+
     const page = await prisma.page.findFirst({
       where: { siteId: options.siteId, path: options.path },
       include: {
@@ -46,6 +65,7 @@ export const getRenderablePage = cache(
             id: true,
             name: true,
             slug: true,
+            timezone: true,
           },
         },
         metadata: true,
@@ -78,6 +98,20 @@ export const getRenderablePage = cache(
       ? activeRevision.blocks
       : page.blocks;
 
+    const pageMetadata = Object.fromEntries(
+      page.metadata.map((m) => [m.key, parseJson(m.value)]),
+    );
+    const revisionMeta = options.includeDraft && activeRevision
+      ? normalizeMeta(activeRevision.meta)
+      : undefined;
+    const mergedMetadata =
+      revisionMeta && options.includeDraft
+        ? {
+            ...pageMetadata,
+            ...revisionMeta,
+          }
+        : pageMetadata;
+
     return {
       id: page.id,
       title: page.title,
@@ -85,21 +119,34 @@ export const getRenderablePage = cache(
       status: page.status,
       publishedAt: page.publishedAt,
       site: page.site,
-      metadata: Object.fromEntries(
-        page.metadata.map((m) => [m.key, parseJson(m.value)]),
-      ),
-      blocks: blocksSource.map((block) => ({
-        id: block.id,
-        kind: block.kind,
-        sortOrder: block.sortOrder,
-        data: parseBlockData(block.data),
-      })),
+      metadata: mergedMetadata,
+      blocks: blocksSource.map((block) => {
+        const parsed = parseBlock({
+          id: block.referenceKey ?? block.id,
+          kind: block.kind,
+          data: block.data,
+          settings: block.settings,
+        });
+        const referenceKey =
+          (parsed.id as string | undefined) ?? block.referenceKey ?? block.id;
+        return {
+          ...parsed,
+          id: referenceKey,
+          referenceKey,
+          recordId: block.id,
+          sortOrder: block.sortOrder,
+        };
+      }),
       revision: activeRevision
         ? {
             id: activeRevision.id,
             status: activeRevision.status,
-            summary: activeRevision.summary ?? undefined,
+            summary: activeRevision.summary ?? null,
             createdAt: activeRevision.createdAt,
+            scheduledFor: activeRevision.scheduledFor ?? null,
+            scheduledTimezone: activeRevision.scheduledTimezone ?? null,
+            reviewedAt: activeRevision.reviewedAt ?? null,
+            meta: revisionMeta ?? {},
           }
         : undefined,
     };
@@ -121,14 +168,6 @@ export async function listPages(siteId: string) {
   });
 }
 
-function parseBlockData(raw: unknown) {
-  const parsed = contentSchema.safeParse(raw);
-  if (!parsed.success) {
-    return {};
-  }
-  return parsed.data ?? {};
-}
-
 function parseJson(raw: unknown) {
   if (raw === null || typeof raw === "undefined") {
     return null;
@@ -137,3 +176,49 @@ function parseJson(raw: unknown) {
   return raw;
 }
 
+function normalizeMeta(meta: unknown) {
+  if (meta && typeof meta === "object" && !Array.isArray(meta)) {
+    return meta as Record<string, unknown>;
+  }
+  return undefined;
+}
+
+function parseBlock(block: {
+  id?: string;
+  kind: string;
+  data: unknown;
+  settings: unknown;
+}): ParsedBlock {
+  const settingsResult = blockSettingsSchema.safeParse({
+    ...(block.settings && typeof block.settings === "object" ? block.settings : {}),
+  });
+
+  const parsedSettings = settingsResult.success
+    ? settingsResult.data
+    : blockSettingsSchema.parse({
+        background: "default",
+        alignment: "left",
+        fullWidth: false,
+      });
+
+  const result = blockDataSchema.safeParse({
+    id: block.id,
+    kind: block.kind,
+    data: block.data,
+    settings: parsedSettings,
+  });
+
+  if (result.success) {
+    return result.data;
+  }
+
+  return {
+    id: block.id,
+    kind: block.kind,
+    data:
+      block.data && typeof block.data === "object"
+        ? (block.data as Record<string, unknown>)
+        : {},
+    settings: parsedSettings,
+  };
+}

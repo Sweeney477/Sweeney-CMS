@@ -1,4 +1,5 @@
 import Link from "next/link";
+import type { Route } from "next";
 
 import { SiteSwitcher } from "@/components/admin/site-switcher";
 import { Badge } from "@/components/ui/badge";
@@ -13,11 +14,13 @@ type AdminShellProps = {
   activeSite: Site;
 };
 
-const navLinks = [
+const navLinks: { href: Route; label: string }[] = [
   { href: "/admin", label: "Dashboard" },
+  { href: "/admin/media", label: "Media" },
   { href: "/admin/pages", label: "Pages" },
   { href: "/admin/navigation", label: "Navigation" },
   { href: "/admin/settings", label: "Settings" },
+  { href: "/admin/settings/integrations", label: "Integrations" },
 ];
 
 export function AdminShell({
@@ -65,5 +68,4 @@ export function AdminShell({
     </div>
   );
 }
-
 

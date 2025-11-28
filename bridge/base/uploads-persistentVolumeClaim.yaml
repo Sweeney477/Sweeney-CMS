@@ -1,0 +1,16 @@
+#! uploads-persistentVolumeClaim.yaml
+# Generated code, do not edit
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+    name: uploads-data
+    namespace: sweeneycms
+spec:
+    accessModes:
+        - ReadWriteMany
+    resources:
+        requests:
+            storage: 5Gi
+
+
+

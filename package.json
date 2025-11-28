@@ -11,9 +11,17 @@
     "build": "npm run build --workspace web",
     "start": "npm run start --workspace web",
     "lint": "npm run lint --workspace web",
+    "test": "npm run test --workspace web",
     "db:generate": "npm run db:generate --workspace web",
     "db:migrate": "npm run db:migrate --workspace web",
     "db:deploy": "npm run db:deploy --workspace web",
     "db:seed": "npm run db:seed --workspace web"
+  },
+  "devDependencies": {
+    "formidable": "^3.5.1",
+    "mime": "^4.0.4",
+    "openai": "^4.83.0",
+    "sharp": "^0.33.4",
+    "uuid": "^11.0.3"
   }
 }

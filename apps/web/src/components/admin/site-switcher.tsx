@@ -1,5 +1,6 @@
 "use client";
 
+import type { Route } from "next";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useTransition } from "react";
 
@@ -28,7 +29,8 @@ export function SiteSwitcher({ sites, activeSiteId }: Props) {
       }
 
       const query = next.toString();
-      router.push(query ? `${pathname}?${query}` : pathname);
+      const href = (query ? `${pathname}?${query}` : pathname) as Route;
+      router.push(href);
     });
   };
 
@@ -46,10 +48,14 @@ export function SiteSwitcher({ sites, activeSiteId }: Props) {
         {sites.map((site) => (
           <option key={site.id} value={site.id}>
             {site.name}
+            {site.primaryDomain
+              ? ` — ${site.primaryDomain}`
+              : site.slug
+              ? ` — ${site.slug}`
+              : ""}
           </option>
         ))}
       </Select>
     </div>
   );
 }
-

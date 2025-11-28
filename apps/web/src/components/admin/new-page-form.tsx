@@ -8,6 +8,11 @@ type Props = {
   siteId: string;
 };
 
+const handleCreatePage = async (formData: FormData) => {
+  "use server";
+  await createPageAction(formData);
+};
+
 export function NewPageForm({ siteId }: Props) {
   return (
     <Card id="create-page">
@@ -15,7 +20,7 @@ export function NewPageForm({ siteId }: Props) {
         <CardTitle>Create a new page</CardTitle>
       </CardHeader>
       <CardContent>
-        <form action={createPageAction} className="space-y-4">
+        <form action={handleCreatePage} className="space-y-4">
           <input type="hidden" name="siteId" value={siteId} />
           <div className="space-y-2">
             <Label htmlFor="title">Title</Label>
@@ -41,4 +46,3 @@ export function NewPageForm({ siteId }: Props) {
     </Card>
   );
 }
-

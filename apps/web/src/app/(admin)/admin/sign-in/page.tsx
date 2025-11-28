@@ -4,6 +4,11 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { signInAction } from "@/server/actions/auth-actions";
 
+const handleSignIn = async (formData: FormData) => {
+  "use server";
+  await signInAction(formData);
+};
+
 export default function SignInPage() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-slate-50 px-6">
@@ -12,7 +17,7 @@ export default function SignInPage() {
           <CardTitle>Sign in</CardTitle>
         </CardHeader>
         <CardContent>
-          <form action={signInAction} className="space-y-4">
+          <form action={handleSignIn} className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="email">Email</Label>
               <Input id="email" name="email" type="email" required />

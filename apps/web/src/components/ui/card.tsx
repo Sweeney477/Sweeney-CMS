@@ -37,6 +37,17 @@ export function CardTitle({
   );
 }
 
+export function CardDescription({
+  className,
+  ...props
+}: HTMLAttributes<HTMLParagraphElement>) {
+  return (
+    <p className={cn("text-sm text-slate-500", className)} {...props}>
+      {props.children}
+    </p>
+  );
+}
+
 export function CardContent({
   className,
   ...props
@@ -45,5 +56,6 @@ export function CardContent({
     <div className={cn("px-6 py-5 text-sm text-slate-600", className)} {...props} />
   );
 }
+
 
 

@@ -1,14 +1,15 @@
+import path from "path";
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  typedRoutes: true,
   experimental: {
-    typedRoutes: true,
     serverActions: {
       bodySizeLimit: "2mb",
     },
   },
-  eslint: {
-    dirs: ["src"],
+  turbopack: {
+    root: path.resolve(__dirname, "..", ".."),
   },
 };
 

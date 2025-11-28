@@ -7,7 +7,7 @@ services:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
     ports:
-      - "5432:5432"
+      - "6543:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
@@ -16,7 +16,18 @@ services:
       timeout: 5s
       retries: 8
 
+  uploads:
+    image: nginx:alpine
+    restart: unless-stopped
+    depends_on:
+      - postgres
+    ports:
+      - "9050:80"
+    volumes:
+      - ./uploads:/usr/share/nginx/html/uploads
+    environment:
+      - NGINX_ENTRYPOINT_QUIET_LOGS=1
+
 volumes:
   postgres-data:
-
 

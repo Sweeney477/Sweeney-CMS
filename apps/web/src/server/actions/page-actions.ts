@@ -1,10 +1,15 @@
 'use server';
 
+import { randomUUID } from "node:crypto";
+
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
 import { auth } from "@/server/auth";
 import { prisma } from "@/server/db";
+import { blockDataSchema } from "@/lib/blocks";
+import { applyRevisionMetadata, revisionMetaSchema } from "@/server/services/metadata-service";
+import { recordPublicationEvent } from "@/server/services/publication-log-service";
 
 const slugRegex = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
@@ -16,17 +21,14 @@ const createPageSchema = z.object({
   }),
 });
 
-const pageContentSchema = z.object({
+const blocksPayloadSchema = z.array(blockDataSchema).min(1);
+
+const savePageSchema = z.object({
   pageId: z.string().cuid(),
-  heroEyebrow: z.string().optional(),
-  heroHeading: z.string().min(1),
-  heroBody: z.string().optional(),
-  ctaLabel: z.string().optional(),
-  ctaHref: z.string().optional(),
-  richText: z.string().optional(),
-  featureList: z.string().optional(),
-  seoTitle: z.string().optional(),
-  seoDescription: z.string().optional(),
+  revisionId: z.string().cuid().optional(),
+  summary: z.string().max(140).optional(),
+  blocks: z.string().min(2),
+  metadata: z.string().optional(),
 });
 
 const publishSchema = z.object({
@@ -34,8 +36,12 @@ const publishSchema = z.object({
   revisionId: z.string().cuid().optional(),
 });
 
-type ActionResult =
-  | { success: true }
+const unpublishSchema = z.object({
+  pageId: z.string().cuid(),
+});
+
+type ActionResult<T = undefined> =
+  | { success: true; data?: T }
   | { success: false; error: string; issues?: Record<string, string[]> };
 
 export async function createPageAction(formData: FormData): Promise<ActionResult> {
@@ -69,9 +75,9 @@ export async function createPageAction(formData: FormData): Promise<ActionResult
 
 export async function savePageContentAction(
   formData: FormData,
-): Promise<ActionResult> {
+): Promise<ActionResult<{ revisionId: string }>> {
   const raw = Object.fromEntries(formData);
-  const parsed = pageContentSchema.safeParse(raw);
+  const parsed = savePageSchema.safeParse(raw);
 
   if (!parsed.success) {
     return {
@@ -81,86 +87,78 @@ export async function savePageContentAction(
     };
   }
 
-  const {
-    pageId,
-    heroEyebrow,
-    heroHeading,
-    heroBody,
-    ctaLabel,
-    ctaHref,
-    richText,
-    featureList,
-    seoTitle,
-    seoDescription,
-  } = parsed.data;
-  const session = await auth();
+  const blocksInput = safeJson(parsed.data.blocks);
+  const metadataInput = parsed.data.metadata
+    ? safeJson(parsed.data.metadata)
+    : {};
 
-  await prisma.revision.create({
-    data: {
-      pageId,
-      status: "DRAFT",
-      summary: "Content update",
-      authorId: session?.user?.id,
-      blocks: {
-        create: [
-          {
-            kind: "hero",
-            sortOrder: 0,
-            data: {
-              eyebrow: heroEyebrow,
-              heading: heroHeading,
-              body: heroBody,
-              ctaLabel,
-              ctaHref,
-            },
-          },
-          {
-            kind: "rich-text",
-            sortOrder: 1,
-            data: {
-              content: richText,
-            },
-          },
-          {
-            kind: "feature-grid",
-            sortOrder: 2,
-            data: {
-              items: featureList
-                ? featureList
-                    .split("\n")
-                    .map((item) => item.trim())
-                    .filter(Boolean)
-                    .map((value) => ({
-                      title: value,
-                      body: "",
-                    }))
-                : [],
-            },
-          },
-        ],
-      },
-    },
-  });
+  const blocks = blocksPayloadSchema.safeParse(blocksInput);
+  const meta = revisionMetaSchema.safeParse(metadataInput);
 
-  const pageSite = await prisma.page.findUnique({
-    where: { id: pageId },
-    select: { siteId: true },
-  });
-
-  if (!pageSite) {
+  if (!blocks.success || !meta.success) {
     return {
       success: false,
-      error: "Page not found while saving metadata.",
+      error: "Validation failed",
+      issues: {
+        blocks: blocks.success ? [] : ["Invalid block payload"],
+        metadata: meta.success ? [] : ["Invalid metadata"],
+      },
     };
   }
 
-  await Promise.all([
-    upsertMetadata(pageId, pageSite.siteId, "seoTitle", seoTitle),
-    upsertMetadata(pageId, pageSite.siteId, "seoDescription", seoDescription),
-  ]);
+  const session = await auth();
+  if (!session?.user?.id) {
+    return {
+      success: false,
+      error: "You must be signed in to save content.",
+    };
+  }
 
-  revalidatePath(`/admin/pages/${pageId}`);
-  return { success: true };
+  const draftRevision = await resolveDraftRevision(
+    parsed.data.pageId,
+    parsed.data.revisionId,
+  );
+
+  const revision = draftRevision
+    ? await prisma.revision.update({
+        where: { id: draftRevision.id },
+        data: {
+          summary: parsed.data.summary ?? draftRevision.summary ?? "Draft update",
+          meta: meta.data,
+        },
+      })
+    : await prisma.revision.create({
+        data: {
+          pageId: parsed.data.pageId,
+          status: "DRAFT",
+          summary: parsed.data.summary ?? "Draft update",
+          authorId: session.user.id,
+          meta: meta.data,
+        },
+      });
+
+  await prisma.contentBlock.deleteMany({
+    where: { revisionId: revision.id },
+  });
+
+  await prisma.contentBlock.createMany({
+    data: blocks.data.map((block, index) => {
+      const referenceKey =
+        typeof block.id === "string" && block.id.length > 0 ? block.id : randomUUID();
+      return {
+        pageId: parsed.data.pageId,
+        revisionId: revision.id,
+        kind: block.kind,
+        sortOrder: index,
+        data: block.data,
+        settings: block.settings,
+        referenceKey,
+      };
+    }),
+  });
+
+  revalidatePath(`/admin/pages/${parsed.data.pageId}`);
+  return { success: true, data: { revisionId: revision.id } };
 }
 
 export async function publishPageAction(
@@ -178,6 +176,14 @@ export async function publishPageAction(
   }
 
   const { pageId, revisionId } = parsed.data;
+
+  const session = await auth();
+  if (!session?.user?.id) {
+    return {
+      success: false,
+      error: "You must be signed in to publish.",
+    };
+  }
 
   const revision =
     revisionId ??
@@ -200,63 +206,151 @@ export async function publishPageAction(
 
   const pageRecord = await prisma.page.findUnique({
     where: { id: pageId },
-    select: { path: true },
+    select: { path: true, siteId: true },
   });
 
-  await prisma.$transaction([
-    prisma.revision.update({
+  await prisma.$transaction(async (tx) => {
+    const updatedRevision = await tx.revision.update({
       where: { id: revision },
       data: {
         status: "PUBLISHED",
         publishedAt: new Date(),
+        scheduledFor: null,
+        scheduledById: null,
+        scheduledTimezone: null,
       },
-    }),
-    prisma.page.update({
+    });
+
+    await tx.page.update({
       where: { id: pageId },
       data: {
         status: "PUBLISHED",
         publishedAt: new Date(),
       },
-    }),
-  ]);
+    });
+
+    await applyRevisionMetadata(tx, pageId, updatedRevision.meta);
+  });
 
   revalidatePath(`/admin/pages/${pageId}`);
   if (pageRecord?.path) {
     revalidatePath(pageRecord.path);
   }
+
+  if (pageRecord?.siteId) {
+    await recordPublicationEvent({
+      siteId: pageRecord.siteId,
+      pageId,
+      revisionId: revision,
+      actorId: session.user.id,
+      action: "PUBLISH",
+      source: "MANUAL",
+    });
+    await prisma.activityEvent.create({
+      data: {
+        siteId: pageRecord.siteId,
+        pageId,
+        revisionId: revision,
+        actorId: session.user.id,
+        kind: "REVISION_PUBLISHED",
+      },
+    });
+  }
   return { success: true };
 }
 
-async function upsertMetadata(
-  pageId: string,
-  siteId: string,
-  key: string,
-  value?: string,
-) {
-  const trimmed = value?.trim();
-  if (!trimmed) {
-    await prisma.metadata.deleteMany({
-      where: { pageId, key },
-    });
-    return;
+export async function unpublishPageAction(
+  formData: FormData,
+): Promise<ActionResult> {
+  const raw = Object.fromEntries(formData);
+  const parsed = unpublishSchema.safeParse(raw);
+
+  if (!parsed.success) {
+    return {
+      success: false,
+      error: "Validation failed",
+      issues: parsed.error.flatten().fieldErrors,
+    };
   }
 
-  await prisma.metadata.upsert({
-    where: {
-      pageId_key: {
-        pageId,
-        key,
+  const session = await auth();
+  if (!session?.user?.id) {
+    return {
+      success: false,
+      error: "You must be signed in to unpublish.",
+    };
+  }
+
+  const page = await prisma.page.findUnique({
+    where: { id: parsed.data.pageId },
+    select: { id: true, path: true, siteId: true },
+  });
+
+  if (!page) {
+    return { success: false, error: "Page not found." };
+  }
+
+  const latestPublished = await prisma.revision.findFirst({
+    where: { pageId: page.id, status: "PUBLISHED" },
+    orderBy: { createdAt: "desc" },
+    select: { id: true },
+  });
+
+  if (!latestPublished) {
+    return { success: false, error: "Nothing to unpublish." };
+  }
+
+  await prisma.$transaction([
+    prisma.revision.updateMany({
+      where: { pageId: page.id, status: "PUBLISHED" },
+      data: { status: "REVIEW" },
+    }),
+    prisma.page.update({
+      where: { id: page.id },
+      data: {
+        status: "REVIEW",
+        publishedAt: null,
       },
-    },
-    create: {
-      pageId,
-      siteId,
-      key,
-      value: trimmed,
-    },
-    update: {
-      value: trimmed,
-    },
+    }),
+  ]);
+
+  revalidatePath(`/admin/pages/${page.id}`);
+  if (page.path) {
+    revalidatePath(page.path);
+  }
+
+  await recordPublicationEvent({
+    siteId: page.siteId,
+    pageId: page.id,
+    revisionId: latestPublished.id,
+    actorId: session.user.id,
+    action: "UNPUBLISH",
+    source: "MANUAL",
+  });
+
+  return { success: true };
+}
+
+async function resolveDraftRevision(pageId: string, revisionId?: string) {
+  if (revisionId) {
+    const revision = await prisma.revision.findFirst({
+      where: { id: revisionId, pageId, status: "DRAFT" },
+    });
+    if (revision) {
+      return revision;
+    }
+  }
+
+  return prisma.revision.findFirst({
+    where: { pageId, status: "DRAFT" },
+    orderBy: { createdAt: "desc" },
   });
 }
 
+function safeJson(payload: string) {
+  try {
+    return JSON.parse(payload);
+  } catch {
+    return null;
+  }
+}
