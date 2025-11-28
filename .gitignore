@@ -1,0 +1,25 @@
+.DS_Store
+node_modules
+/package-lock.json
+/.npm
+
+# Environment
+.env*
+!.env.example
+!apps/web/.env.example
+
+# Next.js build outputs
+/.next
+/out
+apps/web/.next
+apps/web/out
+
+# Prisma
+/prisma/*.db
+
+# Logs
+*.log
+
+# Vercel
+.vercel
+
