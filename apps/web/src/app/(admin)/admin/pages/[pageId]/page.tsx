@@ -15,13 +15,14 @@ import { listPublicationLog } from "@/server/services/publication-log-service";
 import { listPageActivity } from "@/server/services/activity-service";
 
 type PageEditorProps = {
-  params: { pageId: string };
+  params: Promise<{ pageId: string }>;
 };
 
 export default async function PageEditor({ params }: PageEditorProps) {
   await requireUser();
+  const { pageId } = await params;
   const pageRecord = await prisma.page.findUnique({
-    where: { id: params.pageId },
+    where: { id: pageId },
     include: {
       site: true,
     },

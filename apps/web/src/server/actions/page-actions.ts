@@ -59,6 +59,26 @@ export async function createPageAction(formData: FormData): Promise<ActionResult
   const { siteId, title, slug } = parsed.data;
   const path = `/${slug}`;
 
+  const existingPage = await prisma.page.findFirst({
+    where: {
+      siteId,
+      OR: [
+        { slug },
+        { path },
+      ],
+    },
+  });
+
+  if (existingPage) {
+    return {
+      success: false,
+      error: "A page with this slug already exists for this site.",
+      issues: {
+        slug: ["This slug is already in use. Please choose a different one."],
+      },
+    };
+  }
+
   await prisma.page.create({
     data: {
       siteId,
