@@ -3,6 +3,10 @@ import type { MetadataRoute } from "next";
 import { env } from "@/env";
 import { prisma } from "@/server/db";
 
+// The sitemap reflects live CMS content and requires the runtime database.
+// Keeping it dynamic prevents production builds from querying the database.
+export const dynamic = "force-dynamic";
+
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const sites = await prisma.site.findMany({
     select: {
@@ -63,5 +67,4 @@ function buildPageUrl({
   url.searchParams.set("site", siteSlug);
   return url.toString();
 }
-
 

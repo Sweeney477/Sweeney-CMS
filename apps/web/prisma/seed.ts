@@ -1,4 +1,4 @@
-import { PrismaClient } from "@prisma/client";
+import { PrismaClient, type Prisma } from "@prisma/client";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import bcrypt from "bcryptjs";
 
@@ -368,7 +368,7 @@ async function main() {
         })
       : null;
 
-    const activitySeed = [
+    const activitySeed: Prisma.ActivityEventCreateManyInput[] = [
       {
         siteId: site.id,
         pageId: homePage.id,
@@ -546,4 +546,3 @@ main()
     await prisma.$disconnect();
     process.exit(1);
   });
-
