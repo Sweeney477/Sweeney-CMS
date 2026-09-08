@@ -1,4 +1,4 @@
-import { PrismaClient, type Prisma } from "@prisma/client";
+import { PrismaClient } from "@prisma/client";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import bcrypt from "bcryptjs";
 
@@ -368,7 +368,23 @@ async function main() {
         })
       : null;
 
-    const activitySeed: Prisma.ActivityEventCreateManyInput[] = [
+    type ActivitySeedItem = {
+      siteId: string;
+      pageId: string;
+      revisionId: string;
+      actorId: string;
+      kind:
+        | "REVISION_SUBMITTED"
+        | "REVISION_APPROVED"
+        | "COMMENT_ADDED"
+        | "COMMENT_RESOLVED";
+      metadata: Record<string, string | null>;
+      occurredAt?: Date;
+      commentThreadId?: string;
+      commentId?: string;
+    };
+
+    const activitySeed: ActivitySeedItem[] = [
       {
         siteId: site.id,
         pageId: homePage.id,
